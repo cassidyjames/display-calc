@@ -152,6 +152,7 @@ public class MainWindow : Gtk.Window {
   private bool is_default_width = true;
   private bool is_default_height = true;
   private string direction = "";
+  private int scaling_factor = 1;
 
   private Gtk.Image diagram;
   private Gtk.Entry diag_entry;
@@ -164,6 +165,9 @@ public class MainWindow : Gtk.Window {
   private Gtk.Label range_title_label;
   private Gtk.Label range_description_label;
   private Gtk.Image range_icon;
+  private Gtk.LevelBar range_bar;
+  private Gtk.Label range_bar_min;
+  private Gtk.Label range_bar_max;
   private Range range;
   private Utils.DisplayType display_type;
 
@@ -277,6 +281,14 @@ public class MainWindow : Gtk.Window {
     range_description_label.valign = Gtk.Align.START;
     range_description_label.label = Range.INVALID.description ();
 
+    range_bar = new Gtk.LevelBar ();
+    range_bar.margin_start = range_bar.margin_end = 6;
+    range_bar.hexpand = true;
+    range_bar.valign = Gtk.Align.CENTER;
+
+    range_bar_min = new Gtk.Label (null);
+    range_bar_max = new Gtk.Label (null);
+
     diag_entry.changed.connect (() => {
       inches = double.parse (diag_entry.get_text ());
       assess_dpi (
@@ -334,7 +346,7 @@ public class MainWindow : Gtk.Window {
         default:
           assert_not_reached();
       }
-      
+
       assess_dpi (Utils.dpi (inches, width, height), display_type);
       set_display_icon ();
     });
@@ -358,6 +370,11 @@ public class MainWindow : Gtk.Window {
     data_grid.attach (type_label,      0, 3, 1, 1);
     data_grid.attach (type_modebutton, 1, 3, 4, 1);
 
+    var range_grid = new Gtk.Grid ();
+    range_grid.attach (range_bar_min, 0, 0, 1, 1);
+    range_grid.attach (range_bar,     1, 0, 1, 1);
+    range_grid.attach (range_bar_max, 2, 0, 1, 1);
+
     var assessment_grid = new Gtk.Grid ();
     assessment_grid.column_spacing = 12;
     assessment_grid.halign = Gtk.Align.START;
@@ -373,6 +390,7 @@ public class MainWindow : Gtk.Window {
     assessment_grid.attach (aspect_result_label,      1, 2, 1, 1);
     assessment_grid.attach (dpi_result_label,         2, 2, 1, 1);
     assessment_grid.attach (logical_resolution_label, 3, 2, 1, 1);
+    assessment_grid.attach (range_grid,               0, 3, 4, 1);
 
     var main_layout = new Gtk.Grid ();
     main_layout.column_spacing = 6;
@@ -394,6 +412,12 @@ public class MainWindow : Gtk.Window {
     if (inches > 0 && width > 0 && height > 0) {
       int calculated_dpi = Utils.dpi (inches, width, height);
 
+      if (calculated_dpi >= DPI_INFER_HIDPI) {
+        scaling_factor = 2;
+      } else {
+        scaling_factor = 1;
+      }
+
       dpi_result_label.label = _("%d DPI").printf (calculated_dpi);
 
       recalculate_logical_resolution (width, height, calculated_dpi);
@@ -413,19 +437,14 @@ public class MainWindow : Gtk.Window {
   }
 
   private void recalculate_logical_resolution (int width, int height, int dpi) {
-    if (dpi >= DPI_INFER_HIDPI) {
-      int scaling_factor = 2;
-      int logical_width = (int)(width / scaling_factor);
-      int logical_height = (int)(height / scaling_factor);
+    int logical_width = (int)(width / scaling_factor);
+    int logical_height = (int)(height / scaling_factor);
 
-      logical_resolution_label.label = "%d×%d@%dx".printf (
-        logical_width,
-        logical_height,
-        scaling_factor
-      );
-    } else {
-      logical_resolution_label.label = "%d×%d".printf (width, height);
-    }
+    logical_resolution_label.label = "%d×%d@%dx".printf (
+      logical_width,
+      logical_height,
+      scaling_factor
+    );
   }
 
   private void assess_dpi (double calculated_dpi, Utils.DisplayType display_type) {
@@ -490,12 +509,27 @@ public class MainWindow : Gtk.Window {
     range_icon.icon_name = range.icon ();
     range_title_label.label = range.title ();
     range_description_label.label = range.description ();
+    range_bar.min_value = (ideal_dpi - ideal_range - unclear_range) * scaling_factor;
+    range_bar.max_value = (ideal_dpi + ideal_range + unclear_range) * scaling_factor;
+    range_bar.add_offset_value ("low", (ideal_dpi - ideal_range) * scaling_factor);
+    range_bar.add_offset_value ("high", (ideal_dpi + ideal_range) * scaling_factor);
+
+    range_bar_min.label = range_bar.min_value.to_string ();
+    range_bar_max.label = range_bar.max_value.to_string ();
+
+    if (calculated_dpi > range_bar.max_value) {
+      range_bar.value = range_bar.max_value;
+    } else if (calculated_dpi < range_bar.min_value) {
+      range_bar.value = range_bar.min_value;
+    } else {
+      range_bar.value = calculated_dpi;
+    }
   }
 
   private Utils.DisplayType infer_display_type (double inches) {
     is_default_display_type = true;
 
-    if (inches < 18) {
+    if (inches < INCHES_INFER_EXTERNAL) {
       display_type = Utils.DisplayType.INTERNAL;
       type_modebutton.selected = 0;
     } else {
